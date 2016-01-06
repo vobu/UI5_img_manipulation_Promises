@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Proof of Concept: dynamic image manipulation with UI5 (and Promises)</title>
+
+
+    <script
+            id="sap-ui-bootstrap"
+            src="https://openui5.hana.ondemand.com/resources/sap-ui-core.js"
+            data-sap-ui-theme="sap_bluecrystal"
+            data-sap-ui-libs="sap.m"
+            data-sap-ui-compatVersion="edge"
+            data-sap-ui-bindingSyntax="complex"
+            data-sap-ui-preload="async">
+    </script>
+
+    <style type="text/css">
+        * {
+            padding-right: 1rem;
+        }
+    </style>
+
+    <script id="main" type="ui5/xmlview">
+
+	<mvc:View
+		controllerName="vb.controller.main"
+		displayBlock="true"
+		xmlns:mvc="sap.ui.core.mvc"
+		xmlns="sap.m">
+
+        <VBox>
+            <HBox alignItems="Center">
+                <Image
+                    id="moray_eel"
+                    src="moray_eel.jpg"
+                    alt="check out yourdiveapp.com!"
+                    width="500px"
+                    height="281px"
+                    press="transformPic" />
+
+                <Text text="&lt;-- klick this" />
+            </HBox>
+            <HBox alignItems="Center">
+                <Image
+                    id="moray_eel_opacified"
+                    src="placeholder.png"
+                    alt="nada here"/>
+                <Text text="----&gt; opacity decreased" />
+             </HBox>
+
+            <HBox alignItems="Center">
+                <Image
+                    id="moray_eel_inverted"
+                    src="placeholder.png"
+                    alt="nada here"/>
+                <Text text="----&gt; colors inverted" />
+            </HBox>
+
+            <HBox alignItems="Center">
+                <VBox>
+                    <Image
+                        id="moray_eel_resized_3"
+                        src="placeholder.png"
+                        alt="nada here"/>
+                    <Image
+                        id="moray_eel_resized_2"
+                        src="placeholder.png"
+                        alt="nada here"/>
+                    <Image
+                        id="moray_eel_resized_1"
+                        src="placeholder.png"
+                        alt="nada here"/>
+                </VBox>
+                <Text text="----&gt; batch-promified/-resized to \n----&gt;75%, \n----&gt;50% \n----&gt;25%" />
+            </HBox>
+
+        </VBox>
+        </mvc:View>
+
+
+
+    </script>
+
+    <script>
+        sap.ui.getCore().attachInit(function () {
+            "use strict";
+
+            sap.ui.define([
+                "sap/ui/core/mvc/Controller"
+            ], function (Controller) {
+                return Controller.extend("vb.controller.main", {
+
+                    // instance-wide object to
+                    // re-use canvas and context where applicable
+                    oCanvas: null,
+                    oContext: null,
+
+                    // the original image's base64 string representation
+                    sBase64: '',
+
+                    constructor: function () {
+                        this.oCanvas = document.createElement("canvas");
+                        this.oContext = this.oCanvas.getContext("2d");
+                        Controller.apply(this, arguments);
+                    },
+
+                    /**
+                     * onclick/-tap handler of the original image
+                     *
+                     * @param oEvent
+                     */
+                    transformPic: function (oEvent) {
+
+                        // named-func helper
+                        function scalePics() {
+                            var aScales = [
+                                {scale: 0.75, id: 'moray_eel_resized_3'},
+                                {scale: 0.5 , id: 'moray_eel_resized_2'},
+                                {scale: 0.25, id: 'moray_eel_resized_1'}
+                            ];
+
+                            // forEach-equivalent in the Promise-world
+                            return Promise.all(
+                                    aScales.map(function (oObj) {
+                                        // resize picture and return its base64 string equivalent
+                                        // note: this needs to be a Promise!
+                                        return this.resize(oObj.scale, oObj.id);
+                                    }.bind(this))
+                            )
+
+                        }
+
+                                //transform binary img to base64
+                        this.toBase64(oEvent.getSource().getProperty("src"))
+                                // store base64 as property
+                                .then(function (sBase64) {
+                                    this.sBase64 = sBase64;
+                                }.bind(this)) // handle context!
+                                // decrease opacity of the picture
+                                // note: shorthand for
+                                // .then( function() {
+                                //     this.opacify()
+                                // }.bind(this))
+                                .then( this.opacify.bind(this) )
+                                // show the opacified image
+                                .then(function (sBase64opacified) {
+                                    return this.byId("moray_eel_opacified").setSrc(sBase64opacified);
+                                }.bind(this)) // handle context!
+                                // invert colors
+                                .then( this.invert.bind(this) )
+                                // show the image with inverted colors
+                                .then(function (sBase64inverted) {
+                                    return this.byId("moray_eel_inverted").setSrc(sBase64inverted);
+                                }.bind(this)) // handle context!
+                                // batch-scale original pic three times
+                                .then(scalePics.bind(this))
+                                // catch any(!) error in any(!) Promise along the way
+                                .catch(function (oError) {
+                                    console.log(oError);
+                                })
+
+                    },
+
+                    /**
+                     * retrieve the base64-representation of an image
+                     *
+                     * @param sBinaryImgSrc
+                     * @returns {*}
+                     */
+                    toBase64: function (sBinaryImgSrc) {
+                        var that = this; // lazy: do it once instead of cluttering .bind(this) everywhere
+                        // ma, it's a Promise!
+                        return new Promise(
+                                function resolver(resolve, reject) {
+                                    // construct an "anonymous" image at run-time
+                                    var oImage = new Image();
+                                    // trigger onload
+                                    oImage.src = sBinaryImgSrc;
+
+                                    // use class-wide canvas instance to retrieve the pic's base64 equivalent
+                                    oImage.onload = function () {
+                                        that.oCanvas.width = oImage.width;
+                                        that.oCanvas.height = oImage.height;
+
+                                        that.oContext.drawImage(this, 0, 0);
+
+                                        // resolve a.k.a "return" the Promise
+                                        resolve(that.oCanvas.toDataURL("image/jpeg", 1.0));
+                                    };
+
+                                    // sth went wrong
+                                    // -> reject the Promise a.k.a "report" the error
+                                    oImage.onerror = function (oError) {
+                                        reject(oError);
+                                    };
+                                }
+                        );
+                    },
+
+                    /**
+                     * manipulate opacity
+                     *
+                     * @returns {*}
+                     */
+                    opacify: function () {
+                        /*  from here ... */
+                        var that = this;
+                        return new Promise(
+                                function resolver(resolve, reject) {
+                                    var oImage = new Image();
+                                    oImage.src = that.sBase64;
+
+                                    /* ... to here -> see .base64() above */
+                                    oImage.onload = function () {
+                                        that.oCanvas.width = oImage.width;
+                                        that.oCanvas.height = oImage.height;
+
+                                        that.oContext.globalAlpha = 0.2;
+                                        that.oContext.drawImage(this, 0, 0);
+                                        that.oContext.globalAlpha = 1.0; // reset global canvas/context prop
+
+                                        resolve(that.oCanvas.toDataURL("image/jpeg", 1.0));
+                                    };
+
+                                    // see .base64() above
+                                    oImage.onerror = function (oError) {
+                                        reject(oError);
+                                    };
+                                }
+                        )
+                    },
+
+                    invert: function () {
+                        /*  from here ... */
+                        var that = this;
+                        return new Promise(
+                                function resolver(resolve, reject) {
+                                    var oImage = new Image();
+                                    oImage.src = that.sBase64;
+                                    /* ... to here -> see .base64() above */
+                                    oImage.onload = function () {
+                                        that.oCanvas.width = oImage.width;
+                                        that.oCanvas.height = oImage.height;
+
+                                        that.oContext.drawImage(this, 0, 0);
+
+                                        // straight from the mozilla developer KB
+                                        // https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Pixel_manipulation_with_canvas
+                                        var oImgData = that.oContext.getImageData(0, 0,
+                                                that.oCanvas.width, that.oCanvas.height);
+
+                                        // color inversion
+                                        oImgData.data.map(function (data, i) {
+                                            if (i === 0 || i % 4 === 0) {
+                                                oImgData.data[i] = 255 - oImgData.data[i];
+                                                oImgData.data[i + 1] = 255 - oImgData.data[i + 1];
+                                                oImgData.data[i + 2] = 255 - oImgData.data[i + 2];
+                                            }
+                                        });
+                                        // put the manipulated pixels back
+                                        that.oContext.putImageData(oImgData, 0, 0);
+
+                                        resolve(that.oCanvas.toDataURL("image/jpeg", 1.0));
+                                    };
+
+                                    // see .base64() above
+                                    oImage.onerror = function (oError) {
+                                        reject(oError);
+                                    };
+                                }
+                        )
+                    },
+
+                    /**
+                     * Promise to resize an image
+                     *
+                     * @param fScale
+                     * @param sIdPic
+                     * @returns {*}
+                     */
+                    resize: function (fScale, sIdPic) {
+                        var that = this;
+                        return new Promise(
+                                function resolver(resolve, reject) {
+                                    var oImage = new Image();
+                                    oImage.src = that.sBase64;
+
+                                    oImage.onload = function () {
+                                        // calc new image size
+                                        var iWidth = Math.round(fScale * oImage.width);
+                                        var iHeight = Math.round(fScale * oImage.height);
+
+                                        // use dedicated canvas for img manipulation
+                                        // @TODO: this spams the DOM - created canvases might need to be deleted later
+                                        var oCanvas = document.createElement("canvas");
+                                        oCanvas.width = this.width * fScale;
+                                        oCanvas.height = this.height * fScale;
+
+                                        // resizing
+                                        var oContext = oCanvas.getContext("2d");
+                                        oContext.scale(fScale, fScale);
+                                        oContext.drawImage(this, 0, 0);
+
+                                        var sBase64 = oCanvas.toDataURL("image/jpeg", fScale);
+
+                                        // set the UI5 Image object
+                                        that.byId(sIdPic)
+                                                .setWidth(iWidth + 'px')
+                                                .setHeight(iHeight + 'px')
+                                                .setSrc(sBase64);
+
+                                        resolve();
+                                    };
+                                    oImage.onerror = function (oError) {
+                                        reject(oError);
+                                    };
+                                }
+                        )
+
+                    }
+
+                })
+            });
+
+            sap.ui.require([
+                "jquery.sap.global"
+            ], function (jQuery) {
+                sap.ui.xmlview({
+                    viewContent: jQuery("#main").html()
+                }).placeAt('ui5');
+            });
+
+        });
+
+
+    </script>
+</head>
+<body>
+<h1>Dynamic image manipulation with UI5 and Promises</h1>
+<div id="ui5"></div>
+</body>
+</html>
