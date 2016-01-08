@@ -175,9 +175,9 @@
                                 function resolver(resolve, reject) {
                                     // construct an "anonymous" image at run-time
                                     var oImage = new Image();
+                                    oImage.setAttribute('crossOrigin', 'anonymous');
                                     // trigger onload
                                     oImage.src = sBinaryImgSrc;
-
                                     // use class-wide canvas instance to retrieve the pic's base64 equivalent
                                     oImage.onload = function () {
                                         that.oCanvas.width = oImage.width;
